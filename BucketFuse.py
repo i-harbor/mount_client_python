@@ -15,7 +15,6 @@ import time
 import datetime
 import pytz
 from fuse import FUSE, FuseOSError, Operations
-from baidupcsapi import PCS
 import logging
 import tempfile
 import progressbar

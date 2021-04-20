@@ -112,12 +112,6 @@ class BKFS(Operations):
 
         pcs = "http://223.193.2.212/"
         print('pcs api server:')
-        '''
-        print '设置网盘服务器,时间比较长,请耐心等待'
-        pan = self.disk.get_fastest_mirror()
-        self.disk.set_pan_server(pan)
-
-        '''
 
         self.uploadLock = Lock()  # 上传文件时不刷新目录
         self.readLock = Lock()

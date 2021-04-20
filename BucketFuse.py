@@ -110,9 +110,7 @@ class BKFS(Operations):
         # 初始化云服务器
         print('设置服务器')
 
-        pcs = self.disk.get_fastest_pcs_server()
-        # pcs = "http://223.193.2.212/"
-        self.disk.set_pcs_server(pcs)
+        pcs = "http://223.193.2.212/"
         print('pcs api server:')
         '''
         print '设置网盘服务器,时间比较长,请耐心等待'

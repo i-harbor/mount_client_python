@@ -10,7 +10,7 @@ import progressbar
 import json
 import pytz
 import datetime
-
+from threading import Lock
 from collections import defaultdict
 from errno import ENOENT
 from stat import S_IFDIR, S_IFLNK, S_IFREG
@@ -49,9 +49,12 @@ class ProgressBar():
 class BucketFuse(LoggingMixIn, Operations):
     'Example memory filesystem. Supports only one level of files.'
 
-    def __init__(self):
+    def __init__(self, bucket):
+        self.bucket = bucket
         self.buffer = {}
         self.data = defaultdict(bytes)
+        self.traversed_folder = {}
+        self.upload_blocks = {}  # 文件上传时用于记录块的md5,{PATH:{TMP:'',BLOCKS:''}
         self.fd = 0
         now = time()
         self.buffer['/'] = dict(
@@ -137,7 +140,7 @@ class BucketFuse(LoggingMixIn, Operations):
 
     def mkdir(self, path, mode):
         print("***********"+path)
-        url = "http://obs.cstcloud.cn/api/v1/dir/djy1" + path + "/"
+        url = "http://obs.cstcloud.cn/api/v1/dir/" + self.bucket + path + "/"
         ret = requests.post(url=url, headers=headers).content
         foo = json.loads(ret)
         if foo["code"] != 201:
@@ -155,7 +158,7 @@ class BucketFuse(LoggingMixIn, Operations):
 
     def read(self, path, size, offset, fh):
         if path not in self.data:
-            url = "http://obs.cstcloud.cn/api/v1/obj/djy1"+path+"/"
+            url = "http://obs.cstcloud.cn/api/v1/obj/" + self.bucket + path+"/"
             ret = requests.get(url=url, headers=headers).content
             self.data[path] = ret
         print("**************self.data**************")
@@ -164,9 +167,9 @@ class BucketFuse(LoggingMixIn, Operations):
 
     def readdir(self, path, fh):
         if path == "/":
-            url = "http://obs.cstcloud.cn/api/v1/dir/djy1/"
+            url = "http://obs.cstcloud.cn/api/v1/dir/" + self.bucket + "/"
         else:
-            url = "http://obs.cstcloud.cn/api/v1/dir/djy1" + path + "/"
+            url = "http://obs.cstcloud.cn/api/v1/dir/" + self.bucket + path + "/"
 
         ret1 = requests.get(url=url, headers=headers).content
         while True:
@@ -195,7 +198,7 @@ class BucketFuse(LoggingMixIn, Operations):
         #         obj = [f for n, f in enumerate(abs_files) if n % group == i]  # 一组数据
         #         while 1:
         #             try:
-        #                 url1 = "http://obs.cstcloud.cn/api/v1/metadata/djy1/" + obj
+        #                 url1 = "http://obs.cstcloud.cn/api/v1/metadata/" + self.bucket + "/" + obj
         #                 ret = json.loads(requests.get(url=url1, headers=headers).content)
         #                 break
         #             except:
@@ -229,7 +232,7 @@ class BucketFuse(LoggingMixIn, Operations):
 
     def rmdir(self, path):
         # with multiple level support, need to raise ENOTEMPTY if contains any files
-        url = "http://obs.cstcloud.cn/api/v1/dir/djy1" + path + "/"
+        url = "http://obs.cstcloud.cn/api/v1/dir/" + self.bucket + path + "/"
         ret = requests.delete(url=url, headers=headers).content
         if ret == b'':
             self.buffer.pop(path)
@@ -284,7 +287,7 @@ class BucketFuse(LoggingMixIn, Operations):
         print("*************self.data***********")
         print(data)
         print(self.buffer)
-        url = "http://obs.cstcloud.cn/api/v1/obj/djy1"+path+"/"
+        url = "http://obs.cstcloud.cn/api/v1/obj/" + self.bucket + path+"/"
         ret = requests.put(url=url, files={"file": data}, headers=headers).content
         print(ret)
         # def _block_size(stream):
@@ -315,9 +318,10 @@ class BucketFuse(LoggingMixIn, Operations):
         #
         #     tmp.seek(0)
         #     try:
-        #         foo = self.disk.upload_tmpfile(tmp, callback=ProgressBar()).content
-        #         foofoo = json.loads(foo)
-        #         block_md5 = foofoo['md5']
+        #         url = "http://obs.cstcloud.cn/api/v1/obj/" + self.bucket + path+"/"
+        #         ret = requests.put(url=url, files={"file": data}, headers=headers).content
+        #         foo = json.loads(ret)
+        #         block_md5 = foo['md5']
         #     except:
         #         print(foo)
         #
@@ -333,16 +337,6 @@ class BucketFuse(LoggingMixIn, Operations):
         # if len(data) < 4096:
         #     # 检查是否有重名，有重名则删除它
         #     while True:
-        #         try:
-        #             foo = self.disk.meta([path]).content
-        #             foofoo = json.loads(foo)
-        #             break
-        #         except:
-        #             print('error')
-        #
-        #     if foofoo['errno'] == 0:
-        #         logging.debug('Deleted the file which has same name.')
-        #         self.disk.delete([path])
         #     # 看看是否需要上传
         #     if _block_size(tmp) != 0:
         #         # 此时临时文件有数据，需要上传
@@ -351,13 +345,14 @@ class BucketFuse(LoggingMixIn, Operations):
         #         tmp.seek(0)
         #         while True:
         #             try:
-        #                 foo = self.disk.upload_tmpfile(tmp, callback=ProgressBar()).content
-        #                 foofoo = json.loads(foo)
+        #                 url = "http://obs.cstcloud.cn/api/v1/obj/" + self.bucket + path+"/"
+        #                 ret = requests.put(url=url, files={"file": data}, headers=headers).content
+        #                 foo = json.loads(foo)
         #                 break
         #             except:
         #                 print('exception, retry.')
         #
-        #         block_md5 = foofoo['md5']
+        #         block_md5 = foo['md5']
         #         # 在 upload_blocks 中插入本块的 md5
         #         self.upload_blocks[path]['blocks'].append(block_md5)
         #
@@ -378,7 +373,7 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('mount')
+    parser.add_argument('bucket')
     args = parser.parse_args()
-
     logging.basicConfig(level=logging.DEBUG)
-    fuse = FUSE(BucketFuse(), args.mount, foreground=True, allow_other=True)
+    fuse = FUSE(BucketFuse(args.bucket), args.mount, foreground=True, allow_other=True)

@@ -21,13 +21,7 @@ from fuse import FUSE, FuseOSError, Operations, LoggingMixIn
 if not hasattr(__builtins__, 'bytes'):
     bytes = str
 
-headers = {
-    "accept": "application/json",
-    # "Content-Type": "multipart/form-data",
-    # "Content-Type": "multipart/form-data",
-    "Authorization": "Token 46624e723dc76c8541eb9a508742b4b066324d75"
 
-}
 
 class ProgressBar():
     def __init__(self):

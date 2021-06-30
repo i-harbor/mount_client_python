@@ -10,7 +10,7 @@ import progressbar
 import json
 import pytz
 import datetime
-from threading import Lock
+
 from collections import defaultdict
 from errno import ENOENT
 from stat import S_IFDIR, S_IFLNK, S_IFREG
@@ -25,7 +25,7 @@ headers = {
     "accept": "application/json",
     # "Content-Type": "multipart/form-data",
     # "Content-Type": "multipart/form-data",
-    "Authorization": "Token 09aa43b6fa89fd3f8bceb6779a7e1d1b37d9f2ea"
+    "Authorization": "Token 46624e723dc76c8541eb9a508742b4b066324d75"
 
 }
 
@@ -49,12 +49,17 @@ class ProgressBar():
 class BucketFuse(LoggingMixIn, Operations):
     'Example memory filesystem. Supports only one level of files.'
 
-    def __init__(self, bucket):
+    def __init__(self, bucket, token):
+        self.headers = {
+            "accept": "application/json",
+            # "Content-Type": "multipart/form-data",
+            # "Content-Type": "multipart/form-data",
+            "Authorization": "Token " + token
+
+        }
         self.bucket = bucket
         self.buffer = {}
         self.data = defaultdict(bytes)
-        self.traversed_folder = {}
-        self.upload_blocks = {}  # 文件上传时用于记录块的md5,{PATH:{TMP:'',BLOCKS:''}
         self.fd = 0
         now = time()
         self.buffer['/'] = dict(
@@ -87,8 +92,8 @@ class BucketFuse(LoggingMixIn, Operations):
 
     def _add_file_to_buffer(self, path, file_info):
         foo = {}
-        foo['st_ctime'] = self.iso2timestamp(file_info["upt"])
-        foo['st_mtime'] = self.iso2timestamp(file_info["upt"])
+        foo['st_ctime'] = self.iso2timestamp(file_info["ult"])
+        foo['st_mtime'] = self.iso2timestamp(file_info["ult"])
         foo['st_mode'] = (S_IFDIR | 0o0777) if not file_info['fod'] \
             else (S_IFREG | 0o0777)
         foo['st_nlink'] = 2 if not file_info['fod'] else 1
@@ -141,7 +146,7 @@ class BucketFuse(LoggingMixIn, Operations):
     def mkdir(self, path, mode):
         print("***********"+path)
         url = "http://obs.cstcloud.cn/api/v1/dir/" + self.bucket + path + "/"
-        ret = requests.post(url=url, headers=headers).content
+        ret = requests.post(url=url, headers=self.headers).content
         foo = json.loads(ret)
         if foo["code"] != 201:
             raise FuseOSError(errno.EEXIST)
@@ -159,7 +164,7 @@ class BucketFuse(LoggingMixIn, Operations):
     def read(self, path, size, offset, fh):
         if path not in self.data:
             url = "http://obs.cstcloud.cn/api/v1/obj/" + self.bucket + path+"/"
-            ret = requests.get(url=url, headers=headers).content
+            ret = requests.get(url=url, headers=self.headers).content
             self.data[path] = ret
         print("**************self.data**************")
         print(self.data)
@@ -171,7 +176,7 @@ class BucketFuse(LoggingMixIn, Operations):
         else:
             url = "http://obs.cstcloud.cn/api/v1/dir/" + self.bucket + path + "/"
 
-        ret1 = requests.get(url=url, headers=headers).content
+        ret1 = requests.get(url=url, headers=self.headers).content
         while True:
             try:
                 foo = json.loads(ret1)
@@ -199,7 +204,7 @@ class BucketFuse(LoggingMixIn, Operations):
         #         while 1:
         #             try:
         #                 url1 = "http://obs.cstcloud.cn/api/v1/metadata/" + self.bucket + "/" + obj
-        #                 ret = json.loads(requests.get(url=url1, headers=headers).content)
+        #                 ret = json.loads(requests.get(url=url1, headers=self.headers).content)
         #                 break
         #             except:
         #                 print('error')
@@ -233,7 +238,7 @@ class BucketFuse(LoggingMixIn, Operations):
     def rmdir(self, path):
         # with multiple level support, need to raise ENOTEMPTY if contains any files
         url = "http://obs.cstcloud.cn/api/v1/dir/" + self.bucket + path + "/"
-        ret = requests.delete(url=url, headers=headers).content
+        ret = requests.delete(url=url, headers=self.headers).content
         if ret == b'':
             self.buffer.pop(path)
             self.buffer['/']['st_nlink'] -= 1
@@ -288,7 +293,7 @@ class BucketFuse(LoggingMixIn, Operations):
         print(data)
         print(self.buffer)
         url = "http://obs.cstcloud.cn/api/v1/obj/" + self.bucket + path+"/"
-        ret = requests.put(url=url, files={"file": data}, headers=headers).content
+        ret = requests.put(url=url, files={"file": data}, headers=self.headers).content
         print(ret)
         # def _block_size(stream):
         #     stream.seek(0, 2)
@@ -318,10 +323,9 @@ class BucketFuse(LoggingMixIn, Operations):
         #
         #     tmp.seek(0)
         #     try:
-        #         url = "http://obs.cstcloud.cn/api/v1/obj/" + self.bucket + path+"/"
-        #         ret = requests.put(url=url, files={"file": data}, headers=headers).content
-        #         foo = json.loads(ret)
-        #         block_md5 = foo['md5']
+        #         foo = self.disk.upload_tmpfile(tmp, callback=ProgressBar()).content
+        #         foofoo = json.loads(foo)
+        #         block_md5 = foofoo['md5']
         #     except:
         #         print(foo)
         #
@@ -337,6 +341,16 @@ class BucketFuse(LoggingMixIn, Operations):
         # if len(data) < 4096:
         #     # 检查是否有重名，有重名则删除它
         #     while True:
+        #         try:
+        #             foo = self.disk.meta([path]).content
+        #             foofoo = json.loads(foo)
+        #             break
+        #         except:
+        #             print('error')
+        #
+        #     if foofoo['errno'] == 0:
+        #         logging.debug('Deleted the file which has same name.')
+        #         self.disk.delete([path])
         #     # 看看是否需要上传
         #     if _block_size(tmp) != 0:
         #         # 此时临时文件有数据，需要上传
@@ -345,14 +359,13 @@ class BucketFuse(LoggingMixIn, Operations):
         #         tmp.seek(0)
         #         while True:
         #             try:
-        #                 url = "http://obs.cstcloud.cn/api/v1/obj/" + self.bucket + path+"/"
-        #                 ret = requests.put(url=url, files={"file": data}, headers=headers).content
-        #                 foo = json.loads(foo)
+        #                 foo = self.disk.upload_tmpfile(tmp, callback=ProgressBar()).content
+        #                 foofoo = json.loads(foo)
         #                 break
         #             except:
         #                 print('exception, retry.')
         #
-        #         block_md5 = foo['md5']
+        #         block_md5 = foofoo['md5']
         #         # 在 upload_blocks 中插入本块的 md5
         #         self.upload_blocks[path]['blocks'].append(block_md5)
         #
@@ -374,6 +387,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('mount')
     parser.add_argument('bucket')
+    parser.add_argument('token')
     args = parser.parse_args()
     logging.basicConfig(level=logging.DEBUG)
-    fuse = FUSE(BucketFuse(args.bucket), args.mount, foreground=True, allow_other=True)
+    fuse = FUSE(BucketFuse(args.bucket, args.token), args.mount, foreground=True, allow_other=True)
+

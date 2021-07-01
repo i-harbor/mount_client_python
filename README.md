@@ -10,5 +10,5 @@ introduction
 需要的库
 -----
 fusepy: https://github.com/terencehonles/fusepy <br>
-request <br>
-progressbar <br>
+requests: pip install requests <br>
+progressbar: pip install requests  <br>
